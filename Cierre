@@ -1,0 +1,1414 @@
+create or replace PROCEDURE               "CIERRE" 
+ (anio in number , fec_inicio in varchar2, fec_fin varchar2, fec_fin_DDG varchar2) 
+as
+cursor docentes  is 
+select *
+from comuni.personas,comuni.docentes,comuni.nexos_persona,evaluacion_academica
+where per_codigo = doc_per_codigo
+and NEXP_PER_CODIGO=per_codigo
+and nexp_status='ACT'
+and nexp_tnex_codigo In (44,45,46)
+and EACA_PER_CODIGO=per_codigo
+and EACA_AÑO_DESEMPEÑO=anio
+order by  per_apellido1,per_apellido2,per_nombre1;
+-- Cursor que permite calcular el número de horas de posgrado que dicto un profesor
+--se debe considerar para cada evaluación la fecha de inicio y fin de los trimestres a evaluar
+--se tomaran en cuenta las que tienen   dic_desemp='S'
+cursor posgrado (docente number) is
+ select dic_mat_codigo,   0 horasbruto, 1  dura,
+  dic_codigo,mat_post_codigo,dic_seccion,dic_doc_codigo,prg_edicion,
+  dic_cupo,prg_codigo,lap_codigo,prg_loc_codigo,
+  to_char(prg_fec_ini,'yyyy') as sem, dic_tfor_codigo, dic_duracion, act_tact_codigo tact_codigo,loc_tipo 
+  from dicta, materias, materia_lapso_dicta,lapso, programacion, localidad,actividad
+  where PRG_STATUS in ('V','R')
+  and dic_doc_codigo=docente
+  and lap_fec_ini>=to_date(fec_inicio,'dd-mm-yyyy') 
+  and lap_fec_fin<=to_date(fec_fin,'dd-mm-yyyy') 
+  and act_tact_codigo=8
+  and dic_desemp='S'
+  and dic_mat_codigo=mat_codigo
+  and mlt_dic_codigo=dic_codigo
+  and mlt_lap_codigo=lap_codigo
+  and (dic_tfor_codigo=2 or dic_tfor_codigo=3)
+  and act_codigo=prg_act_codigo
+  and prg_codigo=lap_prg_codigo
+  and prg_loc_codigo=loc_codigo
+union
+    select dic_mat_codigo,
+    sum((to_char(hor_fin,'hh24')*60 + to_char(hor_fin,'mi')) - (to_char(hor_ini,'hh24')*60 + to_char(hor_ini,'mi'))) as horasbruto,
+    hor_duracion dura,
+    dic_codigo,mat_post_codigo, dic_seccion,dic_doc_codigo, prg_edicion,
+    dic_cupo,prg_codigo,lap_codigo, prg_loc_codigo,
+    to_char(prg_fec_ini,'yyyy') as sem,
+    dic_tfor_codigo, dic_duracion, act_tact_codigo tact_codigo,loc_tipo
+    from dicta, horario_lapso, lapso, programacion, materias,localidad,actividad
+    where PRG_STATUS in ('V','R')  and DIC_DESEMP='S'and act_tact_codigo=8
+    and hor_fecha>=to_date(fec_inicio,'dd-mm-yyyy') 
+    and hor_fecha<=to_date(fec_fin,'dd-mm-yyyy') 
+    and dic_doc_codigo=docente
+    and dic_tfor_codigo=1
+    and act_codigo=prg_act_codigo
+    and mat_codigo=dic_mat_codigo
+    and HOR_DIC_CODIGO=dic_codigo
+    and lap_codigo=hor_lap_codigo
+    and prg_codigo=lap_prg_codigo
+    and prg_loc_codigo=loc_codigo and dic_mat_codigo=mat_codigo
+  group by dic_mat_codigo,dic_codigo,hor_duracion,dic_codigo,mat_post_codigo,dic_seccion,
+   dic_doc_codigo, prg_edicion, dic_cupo,prg_codigo,lap_codigo, prg_loc_codigo,
+  to_char(prg_fec_ini,'yyyy'),dic_tfor_codigo,dic_duracion, act_tact_codigo,loc_tipo ;
+  --
+  --
+-- Cursor que extrae las actividades de cdg entre las fechas seleccionadas
+cursor actcdg (docente number) is
+select distinct act_codigo, prg_codigo,prg_status,prg_act_codigo,prg_edicion,prg_loc_codigo,
+ to_char(prg_fec_ini,'dd-mm-yy'), prg_cupo, dic_codigo, mat_tfor_codigo, dic_duracion,dic_cupo,
+     dic_seccion seccion, lap_codigo, dic_mat_codigo,act_tact_codigo,loc_tipo, dic_Horas_asinc
+  from dicta, horario_lapso, lapso, programacion, actividad,materias,localidad
+  where PRG_STATUS in ('V','R')
+  and Dic_desemp='S'
+  and dic_doc_codigo=docente
+  and act_tact_codigo<>8 and act_tact_codigo<>4 and act_tact_codigo<>22
+  and hor_fecha>=to_date('01-10-'|| to_char(anio-1),'dd-mm-yyyy')
+ -- and hor_fecha<=to_date(fec_fin_DDG,'dd-mm-yyyy' )
+  and hor_fecha<=to_date('30-09-'|| to_char(anio),'dd-mm-yyyy')
+  and HOR_DIC_CODIGO=dic_codigo
+  and DIC_MAT_CODIGO=mat_codigo
+  and lap_prg_codigo=prg_codigo
+  and lap_codigo=hor_lap_codigo
+  and prg_act_codigo=act_codigo
+  and prg_loc_codigo=loc_codigo
+ UNION
+ select distinct act_codigo, prg_codigo,prg_status,prg_act_codigo,prg_edicion,prg_loc_codigo,
+ to_char(prg_fec_ini,'dd-mm-yy'), prg_cupo, dic_codigo,mat_tfor_codigo,dic_duracion,dic_cupo,
+ dic_seccion, mlt_lap_codigo, dic_mat_codigo,act_tact_codigo,loc_tipo, dic_Horas_asinc
+ from dicta, materia_lapso_dicta, materias, programacion, actividad,localidad
+ where mlt_prg_codigo=prg_codigo
+ and PRG_STATUS in ('V','R')
+ and Dic_desemp='S'
+ and dic_doc_codigo=docente
+ and (mat_tfor_codigo=2 or mat_tfor_codigo=3)
+ and act_tact_codigo<>8 and act_tact_codigo<>4 and act_tact_codigo<>22
+ and prg_fec_ini>=to_date('01-10-'|| to_char(anio-1),'dd-mm-yyyy')
+ --and prg_fec_ini<=to_date(fec_fin_DDG,'dd-mm-yyyy' )
+ and prg_fec_fin<=to_date('30-09-'|| to_char(anio),'dd-mm-yyyy')
+ and MLT_DIC_CODIGO=dic_codigo
+ and DIC_MAT_CODIGO=mat_codigo
+ and prg_act_codigo=act_codigo
+ and prg_loc_codigo=loc_codigo;
+--
+--
+-- Cursor que permite calcular las horas entre actividades
+cursor cdgdiario (docente number,materia number,programacion number,lapso number,coddicta number) is
+select mat_descriptor, 
+((to_char(hor_fin,'hh24')*60 + to_char(hor_fin,'mi')) - (to_char(hor_ini,'hh24')*60 + to_char(hor_ini,'mi'))) as horasbruto,
+hor_duracion,dic_codigo,hor_codigo, lap_codigo,mat_codigo, prg_loc_codigo, dic_Horas_asinc
+from dicta, materias, horario_lapso, lapso, programacion, localidad,horario_break,actividad
+where act_codigo=prg_act_codigo and act_tact_codigo<>8 and act_tact_codigo<>4 and act_tact_codigo<>22 
+and PRG_STATUS in ('V','R') and dic_doc_codigo=docente and dic_mat_codigo=mat_codigo
+and HOR_DIC_CODIGO=dic_codigo and dic_mat_codigo=materia 
+and hor_fecha>=to_date('01-10-' ||to_char(anio-1),'dd-mm-yyyy')
+and hor_fecha<=to_date('30-09-'|| to_char(anio),'dd-mm-yyyy')
+--and hor_fecha<=to_date(fec_fin_DDG,'dd-mm-yyyy' )
+and lap_codigo=hor_lap_codigo 
+and hor_codigo=hobk_hor_codigo(+)
+and lap_prg_codigo=programacion 
+and prg_codigo=lap_prg_codigo 
+and prg_loc_codigo=loc_codigo
+and lap_codigo=lapso 
+and dic_codigo= coddicta
+group by mat_descriptor,
+(to_char(hor_fin,'hh24')*60 + to_char(hor_fin,'mi')) - (to_char(hor_ini,'hh24')*60 + to_char(hor_ini,'mi')),
+hor_duracion,dic_codigo,hor_codigo,lap_codigo,mat_codigo, prg_loc_codigo, dic_Horas_asinc;
+--
+-- Duración total de los recesos de una horario
+--solo para el cierre del año 2006, se realizará desde octubre del 2005 hasta la fecha
+cursor recesos (dicta number) is 
+select sum((to_char(hobk_hor_fin,'hh24')*60 + to_char(hobk_hor_fin,'mi'))-(to_char(hobk_hor_ini,'hh24')* 60 + to_char(hobk_hor_ini,'mi'))) as tiempo_receso
+from dicta,horario_lapso,horario_break 
+where hor_dic_codigo=dic_codigo
+and hor_codigo=hobk_hor_codigo
+and dic_codigo=dicta 
+and hor_fecha>=to_date(fec_inicio,'dd-mm-yyyy') 
+--and hor_fecha<=to_date(fec_fin,'dd-mm-yyyy')
+and hor_fecha<=to_date('30-09-'|| to_char(anio),'dd-mm-yyyy')
+and  HOBK_FECHA=hor_fecha
+and to_char(hobk_hor_ini,'hh24:mi:ss') between to_char(hor_ini,'hh24:mi.ss') and to_char(hor_fin,'hh24:mi:ss')
+and  to_char(hobk_hor_fin,'hh24:mi:ss') between to_char(hor_ini,'hh24:mi,ss') and to_char(hor_fin,'hh24:mi:ss')
+group by dic_prg_codigo;
+-- Duración de los recesos por sesion de clase
+cursor recesoscdg (horario number) is 
+select sum((to_char(hobk_hor_fin,'hh24')*60 + to_char(hobk_hor_fin,'mi'))-(to_char(hobk_hor_ini,'hh24')* 60 + to_char(hobk_hor_ini,'mi'))) as tiempo_receso
+from dicta,horario_lapso,horario_break
+where hor_dic_codigo=dic_codigo and hor_codigo=hobk_hor_codigo and hor_codigo=horario and  HOBK_FECHA=hor_fecha
+and hor_fecha>=to_date('01-10-' ||to_char(anio-1),'dd-mm-yyyy')
+and hor_fecha<=to_date('30-09-'|| to_char(anio),'dd-mm-yyyy')
+--and hor_fecha<=to_date(fec_fin_DDG,'dd-mm-yyyy' )
+and to_char(hobk_hor_ini,'hh24:mi:ss') between to_char(hor_ini,'hh24:mi.ss') and to_char(hor_fin,'hh24:mi:ss')
+and  to_char(hobk_hor_fin,'hh24:mi:ss') between to_char(hor_ini,'hh24:mi,ss') and to_char(hor_fin,'hh24:mi:ss')
+group by dic_prg_codigo;
+-- Evaluación del docente en una materia y sección de posgrado posgrado
+cursor evalposgrado (dicta number)
+is 
+select distinct as_promedio from acumulado_seccion,evaluacion 
+where as_eval_codigo=eval_codigo 
+and as_sec_codigo is null 
+and eval_dic_codigo = dicta;
+-- Evaluacion cdg, con ese valor se modifica la tabla entregas_cdg, con la evaluación
+cursor evalcdg (dicta number)
+is select distinct as_promedio 
+from dicta,acumulado_seccion_cdg,evaluacion 
+where eval_dic_codigo=dic_codigo 
+and eval_codigo=as_eval_codigo 
+and as_cri_codigo = 40 
+and dic_status='E' 
+and dic_codigo=dicta;
+--Eval cdg por ajuste
+cursor evalajuste (dicta number) is
+	select EXA_EVAL_PROMEDIO from evaluar.evaluacion_x_ajuste where exa_dic_codigo=dicta;
+-- Captura el valor de la evaluación de la entrega de material de posgrado
+cursor matpos(programa number,docente number,dicta number ) is
+select entpos_entrega_mat,entpos_entrega_cal 
+from entregas_posgrado 
+where entpos_prg_codigo=programa
+and entpos_per_codigo=docente and entpos_año=anio 
+and entpos_mat_codigo in (select dic_mat_codigo from dicta where dic_codigo=dicta)
+and entpos_dic_seccion in (select dic_seccion from dicta where dic_codigo=dicta);
+--Captura el valor de la evaluación de la entrega de material de cdg
+cursor matcdg(programa number,docente number,dicta number) is
+select entcdg_entrega from entregas_cdg where entcdg_prg_codigo=programa
+and entcdg_per_codigo=docente and entcdg_año=anio and ENTCDG_DIC_CODIGO = dicta;
+--ventana
+/*
+cursor ventana(docente number,anio) is
+select CIEAÑO_PUNT_PI into puntventPIbi, countbi from cierre_año
+where cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio-1 and cieaño_escenario=1 group by CIEAÑO_PUNT_PI;
+*/
+-- Número y Evaluación de participantes cdg, material
+    errores                        exception;
+    vdummy                         char(1);
+    rdoc                           docentes%rowtype; --Registro cursosr docente
+    rpos                           posgrado%rowtype;  -- registro cursor postgrado
+    rec                            recesos%rowtype;   -- registro cursor recesos
+    rcdg                           actcdg%rowtype;    --- registro cursor actividad cdg
+    rcdgdiario                     cdgdiario%rowtype;  --- registro del cursor horas entres las actividades cdg
+    rec2                           recesos%rowtype;     --registro de cursor recesos postgrado
+    rec3                           recesoscdg%rowtype;  --registro de cursor recesos cdg
+    recevalpos                     evalposgrado%rowtype;  --- registro cursor evaluacion postgrado
+    recevalcdg                     evalcdg%rowtype;  --- registro cursor evaluacion cdg
+    fecha_cierre                   varchar2(10);    -- Dia de ejecución del proceso
+    horas_pos                      number(6);        --- Acumula las horas de posgrados para acumulado docencia
+    horas_cdg                      number(6,2);		--- Acumula las horas de cdg para acumulado docencia
+    horas_asinc                     number(6,2);		--- Acumula las horas asin para acumulado docencia
+    eval_pos                       number(5,2);		--- Acumula las evaluacion postgrado por actividad para acumulado docencia
+    eval_cdg                       number(5,2);		--- Acumula las evaluacion por actividad cdg para acumulado docencia
+    tiempo_receso                  number(6);      --- Acumula el tiempo de receso entre las actividades
+    entMaterial					   number(3,2);   -- Puntaje entrega de material
+  	entNotas					   number(3,2);   --- Puntaje entrega de notas
+	  docencia					   number(5,2);   -- guarda el evapost y evalcdg en evaluacion docencia
+	  materialpos					matpos%rowtype; --Puntaje material postgrado
+    materialcdg					   matcdg%rowtype;  -- Puntaje material cdg
+    revalajuste					   evalajuste%rowtype;  -- Nota de evaluacion por ajuste
+    tutorias		    			number(3);  --- Numero de tutorias como tutor
+    tutoriaspunt				   number(3);  -- Puntaje de tutoria como tutor
+    HrsTutorias					   number(3);  -- Horas por tutorias asignadas
+    tutoriaslec                    number(3);  -- Numero de tutorias como lector
+    TotAdici					   number(4,2);  -- Total de actividades adicionales
+    adicount					   number(4);
+    CompDocencia				   number(12,4); -- Calculo del componente docente
+    EvalDoc						   number(10,2); -- Calculo EVALUACION docente solo horas nacionales
+    EvalDocGral					   number(10,2); -- Calculo EVALUACION docente general
+    TotHoras					   number(6,2); --Por ahora decimal
+    TotHorasAcad				   number(6,2); -- Total Horas Academica a considerar nacionales
+    TotHorasAcadGral			   number(6,2); -- Total Horas Academica a considerar general
+    PD							   number(6,4);  -- Puntaje Docente
+    cupo						   number(4);  -- Numero de participantes en actividad CDG
+    totEvalPos					   number(10,2); --total eval posgrado nacional
+    totEvalCdg					   number(10,2); --total eval cdg nacional
+    totHoraPos					   number(4);   --total horas post nacional
+    totHoraCdg					   number(4);  --total horas  cdg nacional
+    totEvalIPos					   number(10,2); --total eval posgrado internacional
+    totEvalICdg					   number(10,2); --total eval cdg internacional
+    totHoraIPos					   number(4);   --total horas post internacional
+    totHoraICdg					   number(4);   --total horas  cdg internacional
+    hrsInnovacion				   number(4);    --Horas agregadas por innovaciona 
+    totevalinn  				   number(10,2); -- Suma del puntajes obtenidos por innovacion
+    puntinnovacion				   number(6,2);  -- Puntaje por innovacion considerado en totDI
+    puntevaldi					   number(6,2);  -- total de suma del puntaje procedimiento DI_Resumen
+    contvent					   number(4);
+    puntLibros					   number(6,2); --Suma de puntaje de libro
+    puntRevistas				   number(6,2);  --Suma de puntaje de revista
+    puntOpublicaciones			   number(6,2);  --Suma de puntaje de otraspub
+    puntCasos					   number(6,2); --Suma de puntaje de Casos
+    puntProyespPI				   number(6,2); --Suma de puntaje de Proyectosespeciales PI    
+    puntventPIbi				   number(6,2);  --Puntaje bianual
+    Pintelectual 				   number(6,2);   -- PI año en curso
+    Pintelectualbi				   number(6,2);   -- PI año  bianual
+    Pintelectualtri				   number(6,2);   -- PI año  trianual
+    countbi						   number(6);   -- contador bianual
+    countri						   number(6);   --- contador trianual
+    puntventPItri				   number(6,2);  ---Puntaje ventana trianual
+--Desarrollo Institucional    
+    puntArbitrajes				   number(6,2);  --Puntaje arbitraje
+    puntacademica				   number(6,2); --Puntaje academica
+    tacademica				       number(3); -- numero academica
+    puntasoprof			    	   number(6,2);	--Puntaje asociacion_profesionales
+    tasoprof					   number(3);	--numero asociacion_profesionales
+    puntcentros					   number(6,2);	--Puntaje centros
+    tcentros					   number(3);	--numero centros
+    puntcomite					   number(6,2);	--Puntaje comite
+    tcomite					       number(3);	--numero comite
+    puntcomision				   number(6,2);	--Puntaje comisiones
+    tcomision				       number(3);	--numero comisiones 
+    puntconsultoria			       number(6,2);	--Puntaje consultoria
+    tconsultoria				   number(3);	--Puntaje consultoria
+    puntcogobierno   			   number(6,2);  -- Puntaje por cogobierno considerado en totPI
+    tcogobierno   			       number(3);  -- numero cogobierno 
+    puntcventos					   number(6,2);	--Puntaje cooventos
+    tcventos					   number(3);	--numero cooventos
+    punteventos					   number(6,2);	--Puntaje eventos
+    teventos					   number(3);	--numero eventos
+    puntdifusion				   number(6,2);	--Puntaje difusiones
+    tdifusion				       number(3);	--numero difusiones
+    puntdifrevista				   number(6,2);	--Puntaje difusion_revista
+    tdifrevista			    	   number(3);	--numero difusion_revista
+    puntdistinciones			   number(6,2);	--Puntaje distinciones
+    tdistinciones			       number(3);	--numero distinciones
+    puntjunta					   number(6,2);	--Puntaje junta
+    tjunta			    		   number(3);	--numero junta
+    puntmprofesional			   number(6,2);	--Puntaje mejoramiento profecional nac+int
+    tmprofesional			       number(3);	--numero mejoramiento profecional nac+int 
+    puntoactividades			   number(6,2);	--Puntaje otras actividades
+    toactividades			       number(3);	--numero otras actividades
+    puntProyespDI				   number(6,2); --Suma de puntaje de Proyectosespeciales DI
+    tProyespDI					   number(4); -- numero de Proyectosespeciales DI
+    puntrse					       number(6,2);	--Puntaje responsabilidad social
+    trse					       number(3);	--numero responsabilidad social
+    puntmprofesionalnac			   number(6,2); --Puntaje mejoramiento profesional nac
+    puntmprofesionalint			   number(6,2);	--Puntaje mejoramiento profesional internacional
+    totcount					   number(4);	--Contador de actividades DI
+    totPI						   number(6,2);	--Total produccion Intelectual
+    /* Creado por Norka para que realice la comparación de ambos datos 01/07/2014 */
+    totPI2						 number(6,2);	--Total produccion Intelectial valor del año    
+    /*fin*/
+    totDI						   number(6,2);	--Total desarrollo institucional
+    totDIanoant					   number(4,2);	--Total desarrollo institucional
+    punPI						   number(4,2);	--Puntaje PI (produccion Intelectual)
+    punDI						   number(4,2);	-- Puntaje DI (Desarrollo Institucional)
+    division					   number(10,2);	--numero de participante por horas
+    CPA							   number(4,2); --Cumplimiento del plan de actividades
+    CEM							   number(4,2); --Consideracion estrategica y movilidad
+    EC							   number(4,2);  -- Evaluación cualitativa
+    track						   varchar2(30); -- Track que clasifica el docente
+    opcionventana					char(1);	--Opcion que se aplica al calculo de la ventana
+begin
+	/* El proceso de depuración carga los puntajes asignados a cada item definido*/
+	--exec depuracion(to_date('30-09-2006','dd-mm-yyyy'),anio);
+	/* El proceso DI_resumen suma los puntajes segun el tope para items considerados en desarrollo Institucional*/
+	--exec 
+	DI_RESUMEN(anio);
+	select to_char(sysdate-1, 'dd-mm-YYYY') into fecha_cierre from dual;
+	-- Se limpian todos los registros para hacer el cierre del año solicitado
+	delete from res_desinst where RDI_AÑO_DESEMPEÑO=anio;
+	commit;
+	delete from evaluacion_docencia where CDOC_AÑO_DESEMPEÑO=anio;
+	commit;
+	delete from cierre_año where cieaño_año_desempeño=anio;
+	commit;
+     for rdoc in docentes loop
+		if docentes%notfound then
+        raise_application_error(-20000,'No hay docentes registrados'  );
+        end if;
+--     if rdoc.per_codigo=53794 then -- prueba profesor (Jorge Menendez) el 1592 es Monteferrante
+        horas_pos:=0;
+        horas_cdg:=0;
+        entMaterial:=1;
+		entNotas:=1;
+--  Se busca la información asignada el profesor en evaluacion academica (tipo ventana, track, CEM y CPA)		
+    SELECT eaca_ventana, eaca_track_profesor, eaca_eval_cem, eaca_eval_cpa 
+	   INTO opcionventana, track, CEM, CPA 
+	   FROM evaluacion_academica
+	   WHERE eaca_per_codigo = rdoc.per_codigo
+		AND  eaca_año_desempeño=anio;
+    -- actividades de posgrado
+--       
+--
+        for rpos  in  posgrado (rdoc.per_codigo) loop
+        DBMS_OUTPUT.put_line('codigo docente'||rdoc.per_codigo);
+		if posgrado%found then
+		  if rpos.dic_tfor_codigo = 1 then
+			 open recesos(rpos.dic_codigo);
+			  fetch recesos into rec2;
+				if recesos%found then
+					horas_pos:=horas_pos+((rpos.horasbruto-rec2.tiempo_receso)/rpos.dura);
+				else
+					horas_pos:=horas_pos+(rpos.horasbruto/rpos.dura);
+				end if;
+		    	--	DBMS_OUTPUT.put_line('codigo dicta'||rpos.dic_codigo);
+			 close recesos;
+			--DBMS_OUTPUT.put_line('horas'||horas_pos);
+			else -- rpos.dic_tfor_codigo = 2
+					horas_pos:=rpos.dic_duracion;
+			end if;
+			open evalposgrado(rpos.dic_codigo);
+			fetch evalposgrado into recevalpos;
+				if evalposgrado%found then
+					eval_pos:=recevalpos.AS_PROMEDIO;
+				else --Si no posee evaluación se consulta en evaluación por ajuste
+					--eval_pos:=0.00;
+					open evalajuste(rpos.dic_codigo);
+					fetch evalajuste into revalajuste;
+						if evalajuste%found then
+							eval_pos:=revalajuste.EXA_EVAL_PROMEDIO;
+						else
+							eval_pos:=0;
+						end if;
+					close evalajuste;
+				end if;
+			close evalposgrado;
+			-- Se busca la evaluación del material
+			open matpos(rpos.prg_codigo, rdoc.per_codigo,rpos.dic_codigo);
+			fetch matpos into materialpos;
+				if matpos%found then
+					entMaterial:=materialpos.entpos_entrega_mat;
+					entNotas:=materialpos.entpos_entrega_cal;
+				else
+					entMaterial:=1;
+					entNotas:=1;
+				end if;
+			close matpos;
+			--***************Se inserta la evaluación del docente por cada actividad posgrado 
+			docencia:=eval_pos;-- Escenario 1
+			insert into evaluacion_docencia 
+			values(rdoc.per_codigo,anio,rpos.prg_codigo,rpos.dic_codigo,rpos.dic_cupo,horas_pos,docencia,rpos.tact_codigo,eval_pos,entMaterial,entNotas,1,rpos.lap_codigo,rpos.prg_loc_codigo,rpos.loc_tipo);
+			commit;
+			--
+			--
+		/*
+			DBMS_OUTPUT.put_line('eval_pos' || eval_pos);
+			DBMS_OUTPUT.put_line('entMaterial' || entMaterial);
+			DBMS_OUTPUT.put_line('entNotas' || entNotas);
+			DBMS_OUTPUT.put_line('docencia' || docencia);
+			-- Se inserta en la tabla de cierre_docencia
+			DBMS_OUTPUT.put_line('dic' || rdoc.per_codigo);
+			DBMS_OUTPUT.put_line('año' || anio);
+			DBMS_OUTPUT.put_line('programacion' || rpos.prg_codigo);
+			DBMS_OUTPUT.put_line('dic_codigo' || rpos.dic_codigo);
+			DBMS_OUTPUT.put_line('dic_cupo' || rpos.dic_cupo);
+			DBMS_OUTPUT.put_line('horas posgrado' || horas_pos);
+			DBMS_OUTPUT.put_line('eval posgrado' || eval_pos);
+			DBMS_OUTPUT.put_line('tipo_actividad' || rpos.tact_codigo);
+			DBMS_OUTPUT.put_line('Entrega de material' || entMaterial);
+			DBMS_OUTPUT.put_line('Entrega de notas' || entNotas);
+			*/
+			entMaterial:=1;
+			entNotas:=1;
+			docencia:=0;
+			horas_pos:=0;
+		end if;
+        end loop;-- loop de as actividades de posgrado
+        --- porceso DDG
+        docencia:=0;
+        --
+        --actividades de cdg
+       for rcdg  in  actcdg (rdoc.per_codigo) loop
+		     if actcdg%found then
+               horas_cdg:=0;
+               if rcdg.dic_Horas_asinc is NULL then 
+                  horas_asinc:=0;
+               else
+                  horas_asinc:=rcdg.dic_Horas_asinc;
+               end if;
+               horas_cdg:=horas_asinc;
+		       IF rcdg.mat_tfor_codigo=1 then	
+				for rcdgdiario  in  cdgdiario (rdoc.per_codigo,rcdg.dic_mat_codigo,rcdg.prg_codigo,rcdg.lap_codigo,rcdg.dic_codigo) loop
+				  if cdgdiario%found then
+				    	open recesoscdg(rcdgdiario.hor_codigo);
+					     fetch recesoscdg into rec3;
+						   if recesoscdg%found then
+					     		horas_cdg:=horas_cdg+((rcdgdiario.horasbruto-rec3.tiempo_receso)/rcdgdiario.hor_duracion);
+						   else
+						    	horas_cdg:=horas_cdg+(rcdgdiario.horasbruto/rcdgdiario.hor_duracion);
+						   end if;
+                        -- if rcdgdiario.dic_Horas_asinc is NULL then 
+                        --     horas_cdg:=horas_cdg+0;
+                        -- else
+                        --     horas_cdg:=horas_cdg+rcdgdiario.dic_Horas_asinc;
+                        -- end if;
+               end if;
+               --horas_cdg:=horas_asinc;
+			--		DBMS_OUTPUT.put_line('codigo dicta'||rcdg.dic_codigo);
+					     close recesoscdg;
+			--	DBMS_OUTPUT.put_line('horas prg_codigo'|| rcdg.prg_codigo ||' ' ||horas_cdg);
+               --end if;
+			   end loop;-- loop de as actividades de cdg por dia
+				ELSE  --rcdg.mat_tfor_codigo=1
+				  horas_cdg:=rcdg.dic_duracion+ horas_asinc;
+				END IF;
+			--Evaluaciones cdg
+		          open evalcdg(rcdg.dic_codigo);
+						fetch evalcdg into recevalcdg;
+							if evalcdg%found then
+								eval_cdg:=recevalcdg.AS_PROMEDIO;
+							else
+								open evalajuste(rcdg.dic_codigo);
+								fetch evalajuste into revalajuste;
+									if evalajuste%found then
+										eval_cdg:=revalajuste.EXA_EVAL_PROMEDIO;
+									else
+										eval_cdg:=0;
+									end if;
+								close evalajuste;
+							end if;
+				-- Se busca la evaluación del material
+	/*		DBMS_OUTPUT.put_line('horas prg_codigo '|| rcdg.prg_codigo);
+			DBMS_OUTPUT.put_line('rdoc.per_codigo '|| rdoc.per_codigo);
+			DBMS_OUTPUT.put_line('rcdg.dic_codigo '|| rcdg.dic_codigo);*/
+			open matcdg(rcdg.prg_codigo, rdoc.per_codigo,rcdg.dic_codigo);
+			fetch matcdg into materialcdg;
+				if matcdg%found then
+					entMaterial:=materialcdg.entcdg_entrega;
+				else
+					entMaterial:=1;
+				end if;
+			close matcdg;
+			--DBMS_OUTPUT.put_line('entMaterial '|| entMaterial);
+				--		DBMS_OUTPUT.put_line('horas'||horas_cdg);
+				--		DBMS_OUTPUT.put_line('evaluacion'||eval_cdg);
+						-- Se inserta en la tabla de cierre_docencia
+			entNotas:=1;
+            ----Yanitza 18-11-219
+			---			select count(*) into cupo from cursa 
+			---			where CUR_STATUS=3 
+			---			and cur_prg_codigo=rcdg.prg_codigo
+			---			and cur_seccion =rcdg.seccion;
+			---			if to_char(cupo) is null or cupo=0 then
+			---				cupo:=rcdg.dic_cupo;
+			---			end if;
+      
+
+              if rcdg.seccion <> '' and rcdg.seccion not in ('U') then 
+                 select count(*) into cupo from cursa 
+                       where CUR_STATUS=3 
+                       and cur_prg_codigo=rcdg.prg_codigo
+                       and cur_seccion =rcdg.seccion;
+              else  
+                 select count(*) into cupo from cursa 
+                      where CUR_STATUS=3 
+                      and cur_prg_codigo=rcdg.prg_codigo;
+              end if;
+              if to_char(cupo) is null or cupo=0 then
+                                cupo:=rcdg.dic_cupo;
+              end if;      
+      --Yanitza 18-11-219
+            
+				--**************************Se inserta la evaluación del docente por cada actividad cdg
+						docencia:=eval_cdg;	--Escenario 1
+					/*
+						DBMS_OUTPUT.put_line('horas prg_codigo '|| rcdg.prg_codigo);
+						DBMS_OUTPUT.put_line('rdoc.per_codigo '|| rdoc.per_codigo);
+						DBMS_OUTPUT.put_line('rcdg.dic_codigo '|| rcdg.dic_codigo);
+						*/
+						if cupo is null or cupo=0 then
+						cupo:=0;
+						end if;
+						insert into evaluacion_docencia values(rdoc.per_codigo,anio,rcdg.prg_codigo,rcdg.dic_codigo,cupo,horas_cdg,docencia,rcdg.act_tact_codigo,eval_cdg,entMaterial,0,1,rcdg.lap_codigo,rcdg.prg_loc_codigo,rcdg.loc_tipo);
+						commit;
+					close evalcdg;
+			entMaterial:=1;
+			entNotas:=1;
+			end if;
+			end loop;-- loop de as actividades de actcdg
+         --*************************Se deben sumar las horas docentes que contemplan trabajos de grado e innovaciones
+         -- Como tutor
+        select count(*),sum(TUT_PUNTAJE_FINAL) 
+        into tutorias,tutoriaspunt from tutorias 
+        where TUT_PER_CODIGO=rdoc.per_codigo 
+        and TUT_AÑO_DESEMPEÑO=anio 
+        and TUT_TIPO_TUTORIA=1 
+        and tut_estatus='A';
+        -- Como lector
+        select count(*) into tutoriaslec from tutorias 
+        where TUT_PER_CODIGO=rdoc.per_codigo 
+        and TUT_AÑO_DESEMPEÑO=anio 
+        and TUT_TIPO_TUTORIA=2 and tut_estatus='A';
+        TotAdici:=0;
+        adicount:=0;
+         --**************************Horas agregadas por Tesis como Tutor
+        HrsTutorias:=0;
+        if tutorias<>0 then
+        HrsTutorias:=4*tutoriaspunt;
+    /*    -- para este modelo se reconceran hasta 32 horas por seminario por prueba la coloque en comentario 02/09
+        if HrsTutorias>=32 then
+			HrsTutorias:=32;
+		end if;*/
+		 -- para este modelo se reconceran puntos hasta un maximo de 5 
+    		if tutorias>=4 then
+	    		tutorias:=5;
+			else
+		    	tutorias:=tutorias+1;
+			end if;
+		end if;
+       /*--******************Puntajes por Innovacion  
+          A partir del 2010 se comenzo a dar puntaje a innovacion y sumarlo al total 
+          de Produccion Intelectual hasta un maximo de 8 punto. Si el docente tiene mas de 8 puntos
+          el excedente se le convierte a horas y se suma a Horas academicas. 
+          El valor de un punto excedente en innovación será equivalente a 8 horas en docencia
+       */     
+         totevalinn:=0;
+         puntinnovacion:=0;
+         hrsInnovacion:=0;
+         totCount:=0;
+        select sum(INN_PUN_INNOVACION-INN_RESTA) into totevalinn
+        from innovacion 
+        where INN_PER_CODIGO=rdoc.per_codigo and INN_AÑO_DESEMPEÑO=anio;
+        if totevalinn is null then
+			     totevalinn:=0;
+        end if;
+        if totevalinn>=8 then
+		      	puntinnovacion:=8;
+		   	else puntinnovacion :=totevalinn;
+        end if;
+        /******************Horas por Innovacion
+        -- El factor multiplicador de 8 equivale al valor en horas de equivalencia del un punto de innovación
+           este numero de horas se sumara a horas academicas, se le resta el 8 porque es el 
+           puntaje tope para innovacion, PARA  las horas por innovación hay un tope de 32 horas*/
+           if totevalinn>8 then
+               hrsInnovacion:= 8*(totevalinn-8);
+               if hrsInnovacion>=32 then
+			            hrsInnovacion:=32;
+               /*modificado por Norka 12/12/2017*/
+               else
+                  hrsInnovacion:= 8*(totevalinn-8);
+			         end if;
+           end if;
+        --Actividades Adicionales, la agregación es aditiva, si se posee mas de 1 act_adicional, tiene como punto=5 
+        --si es uno: puntuación respectiva, si es cero=ninguno
+         --Yanitza 27/11/2019
+        
+        
+        select count(*) into TotAdici 
+        from actividades_docentes_noiesa
+        where ACT_PER_CODIGO=rdoc.per_codigo 
+        and ACT_AÑO_DESEMPEÑO= anio;
+		if TotAdici<>0  then
+        select sum(ACT_PUNTAJE_FINAL) into TotAdici from actividades_docentes_noiesa
+        where ACT_PER_CODIGO=rdoc.per_codigo and ACT_AÑO_DESEMPEÑO= anio;
+        end if;
+         
+         select count(*) into TotAdici 
+         from act_adicional 
+         where ADD_PER_CODIGO=rdoc.per_codigo 
+         and ADD_AÑO_DESEMPEÑO= anio;
+         
+		if TotAdici<>0 then
+        select sum(ADD_PUNTAJE) into TotAdici from act_adicional 
+        where ADD_PER_CODIGO=rdoc.per_codigo and ADD_AÑO_DESEMPEÑO= anio;
+        end if;
+        
+        if TotAdici>=5 then
+			TotAdici:=5;
+        end if;
+        --*****************Producción Intelectual
+       puntLibros:=0;
+       puntRevistas:=0;
+       puntOpublicaciones:=0;
+       puntCasos:=0;
+       puntProyespPI:=0;
+       --Libros
+        select sum(LIB_PUNTAJE_FINAL-lib_resta) into puntLibros 
+        from libros 
+        where lib_per_codigo=rdoc.per_codigo 
+        and lib_AÑO_DESEMPEÑO=anio;
+        if puntLibros is null then
+			puntLibros:=0;
+		end if;
+		--Revistas
+        select sum(REV_PUNTAJE_FINAL-rev_resta) into puntRevistas 
+        from revistas 
+        where REV_PER_CODIGO=rdoc.per_codigo and REV_AÑO_DESEMPEÑO=anio;
+        if puntRevistas is null then
+			puntRevistas:=0;
+		end if;
+		--Otras Publicaciones
+        select sum(OPUB_PUNTAJE_FINAL-opub_resta)  into puntOpublicaciones 
+        from publicaciones_otras 
+        where OPUB_PER_CODIGO=rdoc.per_codigo and OPUB_AÑO_DESEMPEÑO=anio;
+        if puntOpublicaciones is null then
+			puntOpublicaciones:=0;
+		  else 
+		  if puntOpublicaciones > 8 then
+			  puntOpublicaciones:=8;
+			 end if; 
+		end if;
+		--CAsos
+        select sum(CASOS_PUNTAJE_FINAL-casos_resta) into puntCasos
+        from Casos 
+        where casos_PER_CODIGO=rdoc.per_codigo and casos_AÑO_DESEMPEÑO=anio;
+        if puntcasos is null then
+			puntcasos:=0;
+		end if;
+		--Proyectos Especiales PI Si la categoria es uno el proyecto especial se toma para Produccioón Intelectual
+        select sum( PROYECT_PUNTAJE_FINAL - PROYECT_resta) into puntProyespPI
+        from proyectos_esp
+        where  PROYECT_PER_CODIGO=rdoc.per_codigo and  PROYECT_AÑO_DESEMPEÑO=anio
+         and    PROYECT_CATEG_CODIGO=1;
+        if puntProyespPI is null then
+			puntProyespPI:=0;
+		else 
+			if puntProyespPI > 20 then
+			  puntProyespPI:=20;
+			 end if; 
+		end if;
+		 --**************Inicialización variables de sumatoria de Desempeño Institucional 
+		puntacademica:=0;
+		puntasoprof:=0;
+		puntcentros:=0;
+		puntcomite:=0;
+		puntcomision:=0;
+		puntconsultoria:=0;
+		puntcogobierno:=0;
+		puntcventos:=0;
+		punteventos:=0;
+		puntdifusion:=0;
+		puntdifrevista:=0;
+		puntdistinciones:=0;
+		puntjunta:=0;
+		puntmprofesional:=0;	
+		puntoactividades:=0;
+		puntProyespDI:=0;
+		puntrse:=0;
+		puntevaldi:=0;
+		tacademica:=0;
+		tasoprof:=0;
+		tcentros:=0;
+		tcomite:=0;
+		tcomision:=0;
+		tconsultoria:=0;
+		tcogobierno:=0;
+		tcventos:=0;
+		teventos:=0;
+		tdifusion:=0;
+		tdifrevista:=0;
+		tdistinciones:=0;
+		tjunta:=0;
+		tmprofesional:=0;
+		toactividades:=0;
+		tProyespDI:=0;
+		trse:=0;
+		puntevaldi:=0;
+		--
+    -- Sumatoria del total por topes aqui esta mejoramiento+difusion+difusionrevista+juntas+asocprof
+	   select sum(EVDI_PUNTO), count(*) into puntevaldi,totCount 
+        from eval_di
+        where  evdi_PER_CODIGO=rdoc.per_codigo and evdi_AÑO=anio;
+			if totCount=0 then
+			puntevaldi:=0;
+			end if;
+	-- Academica---Verificar el tiempo
+        select sum(ACA_PUNTAJE_FINAL-ACA_RESTA), count(*) into puntacademica,tacademica
+        from academica 
+        where  ACA_PER_CODIGO=rdoc.per_codigo and ACA_AÑO_DESEMPEÑO=anio;
+			if tacademica=0 then
+			puntacademica:=0;
+			end if;
+	-- Asociaciones profesionales---a partir 2010 lleva tope
+        select sum(EVDI_PUNTO), sum(evdi_numero) into puntasoprof, tasoprof
+		from eval_di
+		where  evdi_PER_CODIGO=rdoc.per_codigo 
+		and  evdi_AÑO=anio
+		and  evdi_clase like 'Aso%';
+			if tasoprof=0 then
+				puntasoprof:=0;
+			end if;
+	-- Centro  Verificar el tiempo
+        select sum(CEN_PUNTAJE_FINAL), count(*)  into puntcentros,tcentros
+        from centro 
+        where  CEN_PER_CODIGO=rdoc.per_codigo and CEN_AÑO_DESEMPEÑO=anio;
+			if tcentros=0 then
+			puntcentros:=0;
+			end if;
+		-- Comite
+        select sum(COM_PUNTAJE_FINAL-COM_RESTA), count(*) into puntcomite, tcomite
+        from comite 
+        where  COM_PER_CODIGO=rdoc.per_codigo and COM_AÑO_DESEMPEÑO=anio;
+			if tcomite=0 then
+			puntcomite:=0;
+			end if;	
+		-- Comisiones  
+        select sum(COMIS_PUNTAJE_FINAL-COMIS_RESTA), count(*) into puntcomision,tcomision
+        from comisiones where  COMIS_PER_CODIGO=rdoc.per_codigo and COMIS_AÑO_DESEMPEÑO=anio;
+			if tcomision=0 then
+			puntcomision:=0;
+			end if;
+		-- Consultorias
+        select Sum(CONS_PUNTAJE_FINAL-CONS_RESTA), count(*) into puntconsultoria,tconsultoria
+         from consultorias 
+         where CONS_PER_CODIGO=rdoc.per_codigo and CONS_AÑO_DESEMPEÑO=anio;
+		 if tconsultoria=0 then
+			puntconsultoria:=0;
+		 end if;
+			if puntconsultoria>=4 then
+	    		puntconsultoria:=4;
+			end if;
+	  -- Cogobierno
+        select sum(COG_PUNTAJE_FINAL), count(*) into puntcogobierno,tcogobierno
+        from cogobierno where  COG_PER_CODIGO=rdoc.per_codigo and COG_AÑO_DESEMPEÑO=anio;
+			if tcogobierno=0 then
+			puntcogobierno:=0;
+			end if;
+		-- Coeventos	
+        select sum(COOEV_PUNTAJE_FINAL - COOEV_RESTA), count(*)  into puntcventos,tcventos
+        from coo_eventos 
+        where  COOEV_PER_CODIGO=rdoc.per_codigo and COOEV_AÑO_DESEMPEÑO=anio;
+			if tcventos=0 then
+			puntcventos:=0;
+			end if;
+		-- Eventos
+        select sum(EVEN_PUNTAJE_FINAL-EVEN_RESTA), count(*) into punteventos,teventos
+        from eventos where  EVEN_PER_CODIGO=rdoc.per_codigo and EVEN_AÑO_DESEMPEÑO=anio;
+			if teventos=0 then
+			punteventos:=0;
+			end if;
+		-- Difusiones
+        select sum(EVDI_PUNTO), sum(evdi_numero) into puntdifusion, tdifusion
+		from eval_di
+		where  evdi_PER_CODIGO=rdoc.per_codigo 
+		and  evdi_AÑO=anio
+		and  evdi_clase like 'Difusiones%';
+			if tdifusion=0 or tdifusion is null then
+				puntdifusion:=0;
+			end if;
+	-- Difusion_revista
+        select sum(EVDI_PUNTO), sum(evdi_numero) into puntdifrevista, tdifrevista
+		from eval_di
+		where  evdi_PER_CODIGO=rdoc.per_codigo 
+		and  evdi_AÑO=anio
+		and  evdi_clase like 'Dif_revista%';
+			if tdifrevista=0 or tdifrevista is null then
+				puntdifrevista:=0;
+			end if;
+     -- Distinciones	(no se sume a partir del 2010)		
+	 select sum(DIST_PUNTAJE_FINAL-DIST_RESTA), count(*) into puntdistinciones,tdistinciones
+	   from distinciones where  DIST_PER_CODIGO=rdoc.per_codigo 
+	     and DIST_AÑO_DESEMPEÑO=anio;
+			if tdistinciones=0 then
+			puntdistinciones:=0;
+			end if;
+	-- Junta
+        select sum(EVDI_PUNTO), sum(evdi_numero) into puntjunta, tjunta
+		from eval_di
+		where  evdi_PER_CODIGO=rdoc.per_codigo 
+		and  evdi_AÑO=anio
+		and  evdi_clase like 'Juntas%';
+			if tjunta=0 or tjunta is null then
+				puntjunta:=0;
+			end if;
+    -- Mejoramiento
+        select sum(EVDI_PUNTO), sum(evdi_numero) into puntmprofesional, tmprofesional
+		from eval_di
+		where  evdi_PER_CODIGO=rdoc.per_codigo 
+		and  evdi_AÑO=anio
+		and  evdi_clase like 'Mejoramiento%';
+			if tmprofesional=0 or tmprofesional is null then
+				puntmprofesional:=0;
+			end if;
+	-- Otras actividades	
+	        select sum(OACT_PUNTAJE_TOTAL-OACT_RESTA), count(*) into puntoactividades,toactividades
+	        from otras_actividades 
+	        where  OACT_PER_CODIGO=rdoc.per_codigo 
+	        and OACT_ANIO=anio;
+			if toactividades=0 then
+			puntoactividades:=0;
+			end if;
+	--Proyectos Especiales DI Si la categoria es dos el proyecto especial se toma para Desarrollo Institucional
+        select sum( PROYECT_PUNTAJE_FINAL - PROYECT_resta), count(*) into puntProyespDI, tProyespDI
+        from proyectos_esp
+        where  PROYECT_PER_CODIGO=rdoc.per_codigo and  PROYECT_AÑO_DESEMPEÑO=anio
+         and   PROYECT_CATEG_CODIGO=2;
+        if puntProyespDI is null then
+			puntProyespDI:=0;
+		else 
+			if puntProyespDI > 20 then
+			  puntProyespDI:=20;
+			 end if; 
+		end if;
+		-- Responsabilidad Social
+        select sum(rse_PUNTAJE_FINAL - rse_RESTA), count(*)  into puntrse, trse
+        from responsabilidad_social
+        where  rse_PER_CODIGO=rdoc.per_codigo and rse_AÑO_DESEMPEÑO=anio;
+			if trse=0 then
+		  	puntrse:=0;
+			end if;
+-- llena la tabla de resumen desarrollo institucional
+		INSERT INTO RES_desinst (RDI_PER_CODIGO, RDI_AÑO_DESEMPEÑO, RDI_ACAD_NO, RDI_ACAD_PTO, 
+			RDI_ASOP_NO, RDI_ASOP_PTO, RDI_CENT_NO, RDI_CENT_PTO, RDI_COMTI_NO, RDI_COMIT_PTO, 
+			RDI_COM_NO, RDI_COM_PTO, RDI_CONS_NO, RDI_CONS_PTO, RDI_COGO_NO, RDI_COGO_PTO, 
+			RDI_COOEV_NO, RDI_COOEV_PTO, RDI_EVEN_NO, RDI_EVEN_PTO, RDI_DIF_NO, RDI_DIF_PTO, 
+			RDI_DIFR_NO, RDI_DIFR_PTO, RDI_DIST_NO,  RDI_DIST_PTO, RDI_JUN_NO, RDI_JUN_PTO, 
+			RDI_LEC_NO, RDI_LEC_PTO, RDI_MEJ_NO,   RDI_MEJ_PTO,  RDI_OACT_NO, RDI_OACT_PTO, 
+			RDI_PROY_NO,  RDI_PROY_PTO,  RDI_RSE_NO, RDI_RSE_PTO) 
+		VALUES ( rdoc.per_codigo, anio, tacademica,  puntacademica,
+			tasoprof, puntasoprof, tcentros, puntcentros,tcomite,puntcomite,
+			tcomision,puntcomision,tconsultoria,puntconsultoria,tcogobierno, puntcogobierno,
+			tcventos,puntcventos,teventos,punteventos, tdifusion, puntdifusion,
+			tdifrevista,puntdifrevista,tdistinciones,puntdistinciones,tjunta, puntjunta,
+			tutoriaslec,tutoriaslec,tmprofesional, puntmprofesional,toactividades,puntoactividades,
+			tProyespDI,puntProyespDI,trse,puntrse);
+-------------------------------------------------------------------------------
+-------------Se coloca la ventana multianual------------------------------------
+---------------------------------------------------------------------------------
+/*		DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+    	DBMS_OUTPUT.put_line('Producción antes de ventana'|| totPI);
+		DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+		DBMS_OUTPUT.put_line('Producción '|| totPI);
+        DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+        MUY IMPORTANTE ACA SE CALCULA EL VALOR DE TOTPI PARA EL AÑO EN CURSO y la suma de la produccion intelectual 
+        Suma de puntos de libros, revistas y otras publicacione. a partir del 2010 se le añade 
+        el puntaje por innovación, se separan los casos y se agregan proyectos especiales */
+	 totPI:=puntLibros+puntRevistas+puntOpublicaciones+puntinnovacion+puntCasos+puntProyespPI;  
+   totPI2:=puntLibros+puntRevistas+puntOpublicaciones+puntinnovacion+puntCasos+puntProyespPI; 
+   
+	 pintelectual:=puntLibros+puntRevistas+puntOpublicaciones+puntinnovacion+puntCasos+puntProyespPI; 
+   puntventPIbi:= 0; -- Punto_PI ventana bianual
+   puntventPItri:=0;  -- Punto PI ventana trianual 
+   pintelectualbi:=0; ---- Puntaje intelectual bianual
+   pintelectualtri:=0; -- Puntaje intelectual trianual
+/*Si el analista le asigna el valor U para el calculo de la ventana se toma solo la suma de libros, revistas 
+ otras publicaciones, casos, proyectos especiales e innovacion para el año actual*/
+  IF opcionventana='U' then	
+		totPI:=totPI;
+  else						
+    IF anio=2007 then 
+	   	   select count(*) into countbi from cierre_año 
+	   	   where cieaño_per_codigo=rdoc.per_codigo 
+	   	    and cieaño_año_desempeño=anio-1 and cieaño_escenario=1;
+		     if countbi=0 or countbi is null then  --no tiene entrada en 2006
+				    puntventPIbi:=0;
+		     else  --tiene entrada 2006  puntventpibi : puntaje bianal
+				    select CIEAÑO_PUNT_PI, cieaño_pintelectual into puntventPIbi, pintelectualbi
+				    from cierre_año 
+				    where cieaño_per_codigo=rdoc.per_codigo 
+				    and cieaño_año_desempeño=anio-1 and cieaño_escenario=1;
+		     end if;
+		     if puntventPIbi=0 then
+			    totPI:=totPI;
+			   else  --opcionventana='S'
+			  	totPI:=(totPI+pintelectualbi)/2;
+				 end if;
+    END IF;
+	--calculo valido para años posteriores al inicio
+    IF anio >2007 then  
+		       -- Busca valores bianal, valores del año anterior al que se ejecute
+		     select count(*) into countbi from cierre_año 
+					where cieaño_per_codigo=rdoc.per_codigo 
+					and cieaño_año_desempeño=anio-1 
+					and cieaño_escenario=1 ;
+					if countbi=0 or countbi is null then  --no tiene entrada en anio-1
+				        puntventPIbi:=0;
+		      else  --tiene entrada en anio-1  puntventpibi : puntaje bianal
+			        select CIEAÑO_PUNT_PI, cieaño_pintelectual into puntventPIbi, pintelectualbi
+			        from cierre_año 
+		          where cieaño_per_codigo=rdoc.per_codigo 
+					    and cieaño_año_desempeño=anio-1 
+					    and cieaño_escenario=1 ;
+					end if;         
+		       -- Busca valores trianal, valores de dos años anteriores al que se ejecute
+					select count(*) into countri from cierre_año 
+				  	where cieaño_per_codigo=rdoc.per_codigo 
+					  and cieaño_año_desempeño=anio-2 
+					  and cieaño_escenario=1;
+					IF countri=0 or countri is null then  --no tiene entrada en anio-2
+				        puntventPItri:=0;
+		      ELSE  --tiene entrada en anio-2  puntventpitri : puntaje trianal
+						select CIEAÑO_PUNT_PI, cieaño_pintelectual into puntventPItri, pintelectualtri
+						from cierre_año 
+					   where cieaño_per_codigo=rdoc.per_codigo 
+					   and cieaño_año_desempeño=anio-2 
+					   and cieaño_escenario=1;
+					END IF;
+				 /* Toma el valor segun el dato asignado por el analista encargado del proceso administrativo*/
+         /* Cambio realizado por Norka 30/06/2014, porque no tomaba en cuenta la pantalla bianal */
+					 --IF opcionventana='S' then	 -- se toma el calculo bianal
+          IF opcionventana='B' then
+            if ((totPI+pintelectualbi)/2) > totPI then -- Incluido por Yanitza 12/06/2017
+            --if ((totPI+puntventPIbi)/2) > totPI then
+              totPI:=(totPI+pintelectualbi)/2;
+              --totPI:=(totPI+puntventPIbi)/2;
+            end if;
+          else -- opcionventana='T'
+            if opcionventana='T' then
+              if ((totPI+pintelectualbi+pintelectualtri)/3) > totPI then -- Incluido por Yanitza 12/06/2017
+              --if ((totPI+puntventPIbi+puntventPItri)/3) > totPI then
+                totPI:= (totPI+pintelectualbi+pintelectualtri)/3; -- Calculo trianal
+                --totPI:= (totPI+puntventPIbi+puntventPItri)/3; -- Calculo trianal
+              end if;
+            end if;
+			    END IF;
+    END IF;
+  END IF;  		
+  /* Carga de cierre de año segun track*/
+  	/*---Calculo Base del modelo de evaluacion para DI no toma en cuenta el track-----	
+  	Para el modelo 2010 se establece que los puntos que exedan de 40 del año anterior se contaran para el puntaje del año evaluado
+  	*/
+  	/* Se activara para 2011
+  	  select (CIEAÑO_PUNT_DI-40) into totDianoant 
+      from cierre_año 
+	  where cieaño_per_codigo=rdoc.per_codigo 
+	  and cieaño_año_desempeño=anio-1;*/
+/* en el modelo anterior se le daba .5 por tutorialectura.
+		totDI:=puntArbitrajes+puntacademica+puntcentros+puntcventos+puntcomite+puntcogobierno+puntmprofesional+puntdistinciones+punteventos+puntdifusion+puntcomision+puntconsultoria+puntoactividades+0.5*tutoriaslec;*/
+		totDI:=puntevaldi+puntrse+puntacademica+puntcentros+puntcventos+puntcomite+puntcogobierno+puntProyespDI+punteventos+puntcomision+puntconsultoria+puntoactividades+tutoriaslec;
+-- Si hay un excedente de 40 del año anterio TotDI en igual a ToTdi + el excedente del año anterior totDianoant
+		/*If totdianoant > 0 then
+		   totDI:=totDI + totDianoant
+		end if;   */
+		if totDI <=25 then
+			punDI:=((totDI/10)+ 1.5);
+		end if;
+		if totDI >25 and totDI<41.66 then
+			punDI:=((0.90*totDI/15) + 2.5);
+		end if;
+		if totDI >=41.66 then
+			punDI:=5;
+		end if;
+	--- CALCULO DE VARIABLES HORAS Y EVALUACION NACIONAL E INTERNACIONAL PARA POSTGRADO Y DDG
+    totEvalPos:=0;
+		totEvalCdg:=0;
+		totEvalIPos:=0;
+		totEvalICdg:=0;
+		totHoraIPos:=0; 
+		totHoraPos :=0;
+		totHoraCdg:=0;
+		totHoraICdg :=0;
+		EvalDoc:=0;
+		EvalDocGral:=0;
+  	--Evaluacion Total de Materias de posgrado nacional
+		select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS),sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into totEvalPos,division from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 
+		and CDOC_TIPO_ACT=8 and CDOC_LOC_TIPO='N' and CDOC_ESCENARIO=1;
+		if division=0 then
+			totEvalPos:=0;
+		else
+			totEvalPos:=totEvalPos/division;
+		end if;
+	 --Evaluacion Total de Materias de posgrado internacionales
+		select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS),sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into totEvalIPos,division from evaluacion_docencia where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 and CDOC_TIPO_ACT=8 
+		and CDOC_LOC_TIPO='I'
+		and CDOC_ESCENARIO=1;
+		if division=0 then
+			totEvalIPos:=0;
+		else
+			totEvalIPos:=totEvalIPos/division;
+		end if;
+		--Evaluacion Total de Actividades de CDG nacionales
+		select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS),sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into totEvalCdg,division from evaluacion_docencia where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>878787 and CDOC_TIPO_ACT<>8 and CDOC_TIPO_ACT<>4 
+		and CDOC_LOC_TIPO='N'
+		and CDOC_ESCENARIO=1;
+		if division=0 then
+			totEvalCdg:=0;
+		else
+			totEvalCdg:=totEvalCdg/division;
+		end if;
+		--Evaluacion Total de Actividades de CDG internacionales
+		select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS), sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into totEvalICdg, division from evaluacion_docencia where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>878787 and CDOC_TIPO_ACT<>8 
+		and CDOC_TIPO_ACT<>4 and CDOC_LOC_TIPO='I'
+		and CDOC_ESCENARIO=1;
+		if division=0 then
+			totEvalICdg:=0;
+		else
+			totEvalICdg:=totEvalICdg/division;
+		end if;
+  	--EVALDOCENCIA NACIONAL
+		select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS),sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into EvalDoc,division from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 
+		and CDOC_LOC_TIPO='N' and CDOC_ESCENARIO=1;
+		if division=0 then
+			EvalDoc:=0;
+		else
+			EvalDoc:=EvalDoc/division;
+		end if;
+	 	-- EVALDOCENCIA GENERAL
+			select sum(CDOC_EVALDESEMPEÑO*CDOC_NUM_EST*CDOC_HORAS),sum(CDOC_NUM_EST*CDOC_HORAS) 
+		into EvalDocGral, division from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 
+		and CDOC_ESCENARIO=1;
+		if division=0 then
+			EvalDocGral:=0;
+		else
+			EvalDocGral:=EvalDocGral/division;
+		end if;
+  	--Horas totales de Posgrado nacionales
+		select sum(CDOC_HORAS) into totHoraPos 
+		from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 
+		and CDOC_TIPO_ACT=8 and CDOC_LOC_TIPO='N'
+		and CDOC_ESCENARIO=1;
+  --Horas totales de Posgrado Internacional
+		select sum(CDOC_HORAS) into totHoraIPos 
+		from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>0 
+		and CDOC_TIPO_ACT=8 and CDOC_LOC_TIPO='I' 
+		and CDOC_ESCENARIO=1;
+    --Horas totales de CDG nacionales
+		select sum(CDOC_HORAS) into totHoraCdg 
+		from evaluacion_docencia where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>8787 and CDOC_TIPO_ACT<>8 
+		and CDOC_TIPO_ACT<>4 and CDOC_TIPO_ACT<>22 and CDOC_LOC_TIPO='N'
+		and CDOC_ESCENARIO=1;
+	 --Horas totales de CDG Internacional
+		select sum(CDOC_HORAS) into totHoraICdg 
+		from evaluacion_docencia where CDOC_PER_CODIGO=rdoc.per_codigo 
+		and CDOC_AÑO_DESEMPEÑO=anio and CDOC_EVALDESEMPEÑO<>7676 and CDOC_TIPO_ACT<>8 
+		and CDOC_TIPO_ACT<>4 and CDOC_TIPO_ACT<>22 and CDOC_LOC_TIPO='I'
+		and CDOC_ESCENARIO=1;
+	 --TOTAL HORAS ACADEMICAS NACIONALES  TotHorasAcad
+		select sum(CDOC_HORAS) into TotHorasAcad 
+		from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo and CDOC_AÑO_DESEMPEÑO=anio 
+		and CDOC_EVALDESEMPEÑO<>9898 and CDOC_LOC_TIPO='N' and CDOC_ESCENARIO=1;
+		if to_char(TotHorasAcad) is null then
+				TotHorasAcad:=0;
+		end if;
+	 --TOTAL HORAS ACADEMICAS GENERAL  TotHorasAcadGral
+		select sum(CDOC_HORAS) into TotHorasAcadGrAL
+		from evaluacion_docencia 
+		where CDOC_PER_CODIGO=rdoc.per_codigo and CDOC_AÑO_DESEMPEÑO=anio 
+		and CDOC_EVALDESEMPEÑO<>98898  and CDOC_ESCENARIO=1;
+		if to_char(TotHorasAcadGral) is null then
+				TotHorasAcadGral:=0;
+		end if;
+ /*TRACK */
+ --INVESTIGADOR
+ If  track = 'Investigador'  then
+ ---Calculo Base del modelo de evaluacion para PI Produccion Intelectual
+		if totPI <=60 then
+			punPI:=1;
+		end if;
+		if totPI >5 and totPI<=23 then
+			punPI:=totPI/6 +1/6;
+		end if;
+		if totPI >23 and totPI<30.77 then
+			punPI:=(((0.90*totPI)/7 ) + (7.3/7));
+		end if;
+		if totPI >30.77 then
+			punPI:=5;
+		end if;
+	 -- *Evaluacion de la docencia por actividad
+		TotHoras:=0;
+		/*--------Valida el numero de horas nacionales, si son mayores al minimo por track, 
+		se le toma en cuenta las horas y la evaluacion internacional
+		if TotHorasAcad >=140  then
+				TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if; ----------------*/
+      -----Modificado por Diana Maldonado 23/01/2011 10:26 pm, segun requerimiento del usuario
+    if totHoraPos>=120 and  totHoraCdg>=20 then
+			  TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if; 
+     
+        
+    
+        TotHoras:=TotHorasAcad+hrsInnovacion+HrsTutorias; 
+
+        PD:=1;
+        -----Modificado por Norka Ramirez 9/12/2011 9:25am, segun requerimiento del usuario
+      /* if TotHoras <=60 then
+          PD:=1;
+        end if;
+  			if TotHoras >60 and TotHoras<=140 then
+    			PD:=(TotHoras/40) -0.5;
+      	end if;
+   			if TotHoras >140 and TotHoras<=150 then
+  				PD:=(TotHoras/10) -11;
+    		end if;
+  			if TotHoras >150 and TotHoras<=161.11 then
+    			PD:=((0.09*TotHoras)-9.5);
+      	end if;
+        if TotHoras >=161.11 then
+          PD:=5;
+        end if;*/
+        -----Modificado por Diana Maldonado 17/01/2012 9:42 am, segun requerimiento del usuario correo 15/12/2011 Carmen Arteaga
+			if TotHoras <=120 then
+				PD:=1;
+			end if;
+			if TotHoras >120 and TotHoras<=150 then
+				PD:=(TotHoras/10) -11;
+			end if;
+				if TotHoras >150 and TotHoras<161.11 then
+				PD:=((0.09*TotHoras)-9.5);
+			end if;
+			if TotHoras >=161.11 then
+				PD:=5;
+			end if;
+		--COMPONENTE DOCENTE
+        if tutorias is null then
+               tutorias:=0;
+             end if;
+             
+             if TotAdici is null then
+               TotAdici:=0;
+             end if;
+             
+        CompDocencia:= (0.60 * PD) + (0.25 * EvalDoc)+ (0.15 * tutorias) + (0.05 * TotAdici);
+ /*         DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+     DBMS_OUTPUT.put_line('evalincdg '|| totEvalICdg);
+    DBMS_OUTPUT.put_line('evalinpos '|| totEvalIPos);*/
+		--inserta cierre track Investigador
+		insert into cierre_año (cieaño_per_codigo,cieaño_año_desempeño,cieaño_horas_cdg,cieaño_horas_post,cieaño_eval_cdg,cieaño_eval_post,CIEAÑO_EVAL_TG,CIEAÑO_EVAL_TG_lector,CIEAÑO_EVAL_ED,CIEAÑO_EVAL_ACT_ADICIONALES,CIEAÑO_EVAL_CPA,CIEAÑO_EVAL_CEM,
+		CIEAÑO_EVAL_PI,CIEAÑO_EVAL_DI,CIEAÑO_EVAL_INN,CIEAÑO_HORAS_TUT,CIEAÑO_ESCENARIO,CIEAÑO_PUNT_PI,CIEAÑO_PUNT_DI,CIEAÑO_EVAL_CD,cieaño_pintelectual,
+				 CIEAÑO_HORAINT_CDG, CIEAÑO_HORAINT_POST,CIEAÑO_EVALINT_CDG, CIEAÑO_EVALINT_POST, CIEAÑO_TRACK, CIEAÑO_EVAL_PUBLOTR,CIEAÑO_HORAS_INN)
+		values(rdoc.per_codigo,to_char(anio),totHoraCdg,totHoraPos,totEvalCdg,totEvalPos,tutorias,tutoriaslec,CompDocencia,TotAdici,CPA,CEM,
+		punPI,punDI,puntinnovacion,HrsTutorias,1,totPI,totDI,EvalDoc,pintelectual,
+		         totHoraICdg,totHoraIPos,totEvalICdg,totEvalIPos, track, puntOpublicaciones,hrsInnovacion);
+		commit;
+	END IF;--TRACK='Investigador'	
+--MIXTO	
+
+  /* Creado por Norka 01/07/2014 para diferenciar los PI, y tome el valor mayor para beneficiar al Profesor*/ 
+   --if totPI2 > totPI then
+   --   totPI := totPI2;
+   --end if;
+
+	  If  track = 'Mixto'  then
+ ---Calculo  PI Produccion Intelectual-----
+		if totPI <=4 then
+			punPI:=1;
+		end if;
+		if totPI >4 and totPI<=19 then
+			punPI:= ((totPI/5 )+ 1/5);
+		end if;
+		if totPI >19 and totPI<25.66 then
+			punPI:=(((0.90*totPI)/6 ) + (1.15));
+		end if;
+		if totPI >=25.66 then
+			punPI:=5;
+		end if;
+ ---Calculo PD Docencia-----	
+		TotHoras:=0;
+	/*Valida el numero de horas nacionales, si son mayores al minimo por track, 
+		se le toma en cuenta las horas y la evaluacion internacional
+		if TotHorasAcad >=140  then
+				TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if; */
+    -----Modificado por Diana Maldonado 23/01/2011 10:26 pm, segun requerimiento del usuario
+        if totHoraPos>=120 and  totHoraCdg>=20 then
+			  TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if; 
+    
+       TotHoras:=TotHorasAcad+hrsInnovacion+HrsTutorias; 
+        PD:=1;
+			if TotHoras <=76 then
+				PD:=1;
+			end if;
+			if TotHoras >76 and TotHoras<=172 then
+				PD:=((TotHoras/32) - 1.375);
+			end if;
+			if TotHoras >172 and TotHoras<207.55 then
+				PD:= ((0.9*TotHoras/32) - 0.8375);
+			end if;
+			if TotHoras >=207.55 then
+				PD:=5;
+			end if;
+     --COMPONENTE DOCENTE
+            if tutorias is null then
+               tutorias:=0;
+             end if;
+             
+             if TotAdici is null then
+               TotAdici:=0;
+             end if;
+             
+            CompDocencia:= (0.60 * PD) + (0.25 * EvalDoc)+ (0.15 * tutorias) + (0.05 * TotAdici);
+            
+           
+       /*       DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+    DBMS_OUTPUT.put_line('horcdg'|| totHoraCdg);
+		DBMS_OUTPUT.put_line('posgrado '|| totHoraPos);
+		DBMS_OUTPUT.put_line('evalcdg '|| totEvalCdg);
+    DBMS_OUTPUT.put_line('evalpos '|| totEvalPos);
+    DBMS_OUTPUT.put_line('tuttele '|| tutoriaslec);
+    DBMS_OUTPUT.put_line('compdoc '|| CompDocencia);
+    DBMS_OUTPUT.put_line('punpi '|| punPI);
+		DBMS_OUTPUT.put_line('pundi'|| punDI);
+    DBMS_OUTPUT.put_line('puntinova '|| puntinnovacion);
+    DBMS_OUTPUT.put_line('evaldoc '|| EvalDoc);
+    DBMS_OUTPUT.put_line('totadic '|| TotAdici); 
+    DBMS_OUTPUT.put_line('tutoria '|| tutorias);
+    DBMS_OUTPUT.put_line('PD '|| PD);
+    DBMS_OUTPUT.put_line('TotHoras '|| TotHoras);
+    DBMS_OUTPUT.put_line('hrstuto '|| HrsTutorias);
+    DBMS_OUTPUT.put_line('horcdg'|| totHoraCdg);
+		DBMS_OUTPUT.put_line('posgrado '|| totHoraPos);  
+    DBMS_OUTPUT.put_line('hrsInnovacion '|| hrsInnovacion);
+    DBMS_OUTPUT.put_line('TotHorasAcad '|| TotHorasAcad);
+    DBMS_OUTPUT.put_line('totpi '|| totPI);
+		DBMS_OUTPUT.put_line('totdi '|| totDI);
+    DBMS_OUTPUT.put_line('hrstuto '|| HrsTutorias);
+    DBMS_OUTPUT.put_line('ointelect '|| pintelectual);
+    DBMS_OUTPUT.put_line('horintcdg '|| totHoraICdg);
+    DBMS_OUTPUT.put_line('horintpos '|| totHoraIPos);
+    DBMS_OUTPUT.put_line('evalincdg '|| totEvalICdg);
+    DBMS_OUTPUT.put_line('evalinpos '|| totEvalIPos);*/
+--inserta cierre para track Mixto
+	 /* DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+    DBMS_OUTPUT.put_line('horcdg'|| totHoraCdg);
+		DBMS_OUTPUT.put_line('posgrado '|| totHoraPos);
+		DBMS_OUTPUT.put_line('evalcdg '|| totEvalCdg);
+    DBMS_OUTPUT.put_line('evalpos '|| totEvalPos);
+    DBMS_OUTPUT.put_line('tutoria '|| tutorias);
+		DBMS_OUTPUT.put_line('tuttele '|| tutoriaslec);
+    DBMS_OUTPUT.put_line('compdoc '|| CompDocencia);
+    DBMS_OUTPUT.put_line('punpi '|| punPI);
+		DBMS_OUTPUT.put_line('pundi'|| punDI);
+    DBMS_OUTPUT.put_line('puntinova '|| puntinnovacion);
+    DBMS_OUTPUT.put_line('evaldoc '|| EvalDoc);
+    DBMS_OUTPUT.put_line('totadic '|| TotAdici);
+    DBMS_OUTPUT.put_line('totpi '|| totPI);
+		DBMS_OUTPUT.put_line('totdi '|| totDI);
+    DBMS_OUTPUT.put_line('hrstuto '|| HrsTutorias);
+    DBMS_OUTPUT.put_line('ointelect '|| pintelectual);
+    DBMS_OUTPUT.put_line('horintcdg '|| totHoraICdg);
+    DBMS_OUTPUT.put_line('horintpos '|| totHoraIPos);
+    DBMS_OUTPUT.put_line('evalincdg '|| totEvalICdg);
+    DBMS_OUTPUT.put_line('evalinpos '|| totEvalIPos);*/
+		insert into cierre_año (cieaño_per_codigo,cieaño_año_desempeño,cieaño_horas_cdg,cieaño_horas_post,cieaño_eval_cdg,cieaño_eval_post,CIEAÑO_EVAL_TG,CIEAÑO_EVAL_TG_lector,CIEAÑO_EVAL_ED,CIEAÑO_EVAL_ACT_ADICIONALES,CIEAÑO_EVAL_CPA,CIEAÑO_EVAL_CEM,CIEAÑO_EVAL_PI,
+		CIEAÑO_EVAL_DI,CIEAÑO_EVAL_INN,CIEAÑO_HORAS_TUT,CIEAÑO_ESCENARIO,CIEAÑO_PUNT_PI,CIEAÑO_PUNT_DI,CIEAÑO_EVAL_CD, cieaño_pintelectual,
+		  CIEAÑO_HORAINT_CDG, CIEAÑO_HORAINT_POST,CIEAÑO_EVALINT_CDG, CIEAÑO_EVALINT_POST, CIEAÑO_TRACK,CIEAÑO_EVAL_PUBLOTR,CIEAÑO_HORAS_INN)
+		values(rdoc.per_codigo,to_char(anio),totHoraCdg,totHoraPos,totEvalCdg,totEvalPos,tutorias,tutoriaslec,CompDocencia,TotAdici,CPA,CEM,punPI,
+		       punDI,puntinnovacion,HrsTutorias,1,totPI,totDI,EvalDoc,pintelectual,
+		         totHoraICdg,totHoraIPos,totEvalICdg,totEvalIPos, track, puntOpublicaciones,hrsInnovacion);
+		commit;
+      END IF; --TRACK='Mixto' 
+--TRACK DOCENTE		
+ ---Calculo PI Produccion Intelectual-----	
+ 
+    If  track = 'Docente'  then
+		if totPI <=4 then
+			punPI:=1;
+		end if;
+		if totPI >4 and totPI<=16 then
+			punPI:= totPI/4;
+		end if;
+		if totPI >16 and totPI<20.44 then
+			punPI:=(((0.90*totPI)/4 ) + (0.4));
+		end if;
+		if totPI >20.44 then
+			punPI:=5;
+		end if;
+ ---Calculo PD Docencia-----	
+		TotHoras:=0;
+		/*Valida el numero de horas nacionales, si son mayores al minimo por track, 
+		se le toma en cuenta las horas y la evaluacion internacional 
+		if TotHorasAcad >=210  then
+				TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if;*/
+    -----Modificado por Diana Maldonado 23/01/2011 10:26 pm, segun requerimiento del usuario
+    if totHoraPos>=190 and  totHoraCdg>=20 then
+			  TotHorasAcad:=TotHorasAcadGral;
+				EvalDoc:=EvalDocGral;
+		end if; 
+    
+		TotHoras:=TotHorasAcad+hrsInnovacion+HrsTutorias;
+        PD:=1;
+			if TotHoras <=82 then
+				PD:=1;
+			end if;
+			if TotHoras >82 and TotHoras<=274 then
+				PD:=((TotHoras/64) - 0.28125);
+			end if;
+			if TotHoras >274 and TotHoras<345.11 then
+				PD:=((0.9 * TotHoras/64) + 0.146875);
+			end if;
+			if TotHoras >=345.11 then
+				PD:=5;
+			end if;
+	 /*DBMS_OUTPUT.put_line('PD '|| PD);		
+	 DBMS_OUTPUT.put_line('Docente '|| rdoc.per_codigo);
+    DBMS_OUTPUT.put_line('horcdg'|| totHoraCdg);
+		DBMS_OUTPUT.put_line('posgrado '|| totHoraPos);
+		DBMS_OUTPUT.put_line('evalcdg '|| totEvalCdg);
+    DBMS_OUTPUT.put_line('evalpos '|| totEvalPos);
+    DBMS_OUTPUT.put_line('tutoria '|| tutorias);
+		DBMS_OUTPUT.put_line('tuttele '|| tutoriaslec);
+    DBMS_OUTPUT.put_line('compdoc '|| CompDocencia);
+    DBMS_OUTPUT.put_line('punpi '|| punPI);
+		DBMS_OUTPUT.put_line('pundi'|| punDI);
+    DBMS_OUTPUT.put_line('puntinova '|| puntinnovacion);
+    DBMS_OUTPUT.put_line('evaldoc '|| EvalDoc);
+    DBMS_OUTPUT.put_line('totadic '|| TotAdici);
+    DBMS_OUTPUT.put_line('totpi '|| totPI);
+		DBMS_OUTPUT.put_line('totdi '|| totDI);
+    DBMS_OUTPUT.put_line('hrstuto '|| HrsTutorias);
+    DBMS_OUTPUT.put_line('ointelect '|| pintelectual);
+    DBMS_OUTPUT.put_line('horintcdg '|| totHoraICdg);
+    DBMS_OUTPUT.put_line('horintpos '|| totHoraIPos);
+    DBMS_OUTPUT.put_line('evalincdg '|| totEvalICdg);
+    DBMS_OUTPUT.put_line('evalinpos '|| totEvalIPos);*/
+		--COMPONENTE DOCENTE
+        if tutorias is null then
+               tutorias:=0;
+             end if;
+             
+             if TotAdici is null then
+               TotAdici:=0;
+             end if;
+             
+        
+	       CompDocencia:= (0.60 * PD) + (0.25 * EvalDoc)+ (0.15 * tutorias) + (0.05 * TotAdici);
+        if CompDocencia=0 then
+			      CompDocencia:=1;
+        end if;
+        
+    /* Creado por Norka 01/07/2014 para diferenciar los PI, y tome el valor mayor para beneficiar al Profesor*/ 
+    if totPI2 > totPI then
+      totpi := totpi2;
+    end if;
+ 
+		--inserta cierre para track Docente
+		insert into cierre_año (cieaño_per_codigo,cieaño_año_desempeño,cieaño_horas_cdg,cieaño_horas_post,cieaño_eval_cdg,cieaño_eval_post,CIEAÑO_EVAL_TG,CIEAÑO_EVAL_TG_lector,CIEAÑO_EVAL_ED,CIEAÑO_EVAL_ACT_ADICIONALES,CIEAÑO_EVAL_CPA,CIEAÑO_EVAL_CEM,CIEAÑO_EVAL_PI,CIEAÑO_EVAL_DI,CIEAÑO_EVAL_INN,CIEAÑO_HORAS_TUT,CIEAÑO_ESCENARIO,CIEAÑO_PUNT_PI,CIEAÑO_PUNT_DI,CIEAÑO_EVAL_CD,cieaño_pintelectual, 
+		 CIEAÑO_HORAINT_CDG, CIEAÑO_HORAINT_POST,CIEAÑO_EVALINT_CDG, CIEAÑO_EVALINT_POST, CIEAÑO_TRACK,CIEAÑO_EVAL_PUBLOTR, CIEAÑO_HORAS_INN)
+		 values(rdoc.per_codigo,to_char(anio),totHoraCdg,totHoraPos,totEvalCdg,totEvalPos,tutorias,tutoriaslec,CompDocencia,TotAdici,CPA,CEM,punPI,punDI,puntinnovacion,HrsTutorias,1,totPI,totDI,EvalDoc, pintelectual,
+		         totHoraICdg,totHoraIPos,totEvalICdg,totEvalIPos, track, puntOpublicaciones,hrsInnovacion);
+		commit;
+	END IF;
+ --TRACK='Docente'
+--Cambia los valores null por cero en la tabla cierre de año
+		update cierre_año set cieaño_horaint_cdg=0 where cieaño_horaint_cdg is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set cieaño_horaint_post=0 where cieaño_horaint_post is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set cieaño_horas_cdg=0 where cieaño_horas_cdg is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set cieaño_horas_post=0 where cieaño_horas_post is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_TG=0 where CIEAÑO_EVAL_TG is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_TG_lector=0 where CIEAÑO_EVAL_TG_lector is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_ED=0 where CIEAÑO_EVAL_ED is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_ACT_ADICIONALES=0 where CIEAÑO_EVAL_ACT_ADICIONALES is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_PI=0 where CIEAÑO_EVAL_PI is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_DI=0 where CIEAÑO_EVAL_DI is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set CIEAÑO_EVAL_INN=0 where CIEAÑO_EVAL_INN is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set cieaño_eval_cpa=0 where cieaño_eval_cpa is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		update cierre_año set cieaño_eval_cem=0 where cieaño_eval_cem is null and cieaño_per_codigo=rdoc.per_codigo and cieaño_año_desempeño=anio;
+		commit;
+        --Inicializa variables puntaje docente (PD) puntaje produccion intelectual (totPI) puntaje desarrollo
+        -- institucional (totDI), etc.
+       EvalDoc:=0;
+       PD:=0;
+       tutorias:=0;
+       TotAdici:=0;
+       totPI:=0;
+       totDI:=0;
+--   end if; -- solo para probar con un profesor
+     end loop;  --Loop de los docentes
+end; 
